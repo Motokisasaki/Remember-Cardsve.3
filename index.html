@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#020617" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="GBC Cards" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>GBC Interview Flashcards</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <p class="eyebrow">Interview Practice App</p>
+        <h1>GBC 単語帳カード</h1>
+        <p class="lead">Excelの英語質問・回答を、暗記カード形式で確認できるWebアプリです。</p>
+      </div>
+
+      <section class="panel stats-panel">
+        <h2>進捗</h2>
+        <div class="stat-grid">
+          <div class="stat-card"><span>総数</span><strong id="totalCount">0</strong></div>
+          <div class="stat-card"><span>表示中</span><strong id="visibleCount">0</strong></div>
+          <div class="stat-card"><span>OK数</span><strong id="okCount">0</strong></div>
+          <div class="stat-card"><span>OK率</span><strong id="okRate">0%</strong></div>
+        </div>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+        <div class="button-row stack">
+          <button id="resetOkBtn" class="ghost danger">OK状態を全解除</button>
+          <button id="shuffleBtn" class="ghost">今の条件でランダム再配置</button>
+        </div>
+      </section>
+
+      <section class="panel help-panel">
+        <h2>ショートカット</h2>
+        <ul>
+          <li>Space: カードをめくる</li>
+          <li>← / → : 前へ / 次へ</li>
+          <li>O: OK切り替え</li>
+          <li>R: ランダム並び替え</li>
+        </ul>
+        <div class="install-box">
+          <button id="installBtn" class="primary install-btn hidden" type="button">ホーム画面に追加</button>
+          <p id="installHelp" class="install-help">初回読み込み後はオフラインでも使えます。iPhoneでは共有メニューから「ホーム画面に追加」を選んでください。</p>
+          <p id="networkStatus" class="network-status" aria-live="polite"></p>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div>
+          <p class="eyebrow">Flashcard</p>
+          <h2 id="deckTitle">カード表示</h2>
+        </div>
+        <div class="counter" id="counterText">0 / 0</div>
+      </div>
+
+      <section class="card-stage">
+        <button class="nav-btn" id="prevBtn" aria-label="前のカード">◀</button>
+        <article class="flashcard" id="flashcard" tabindex="0" aria-live="polite">
+          <div class="face face-front">
+            <div class="face-meta">
+              <span class="badge" id="categoryBadge">カテゴリ</span>
+              <span class="badge soft" id="statusBadge">未OK</span>
+            </div>
+            <div class="face-body">
+              <p class="subheading">Question</p>
+              <h3 id="questionEn">カードを読み込み中...</h3>
+              <p id="questionJa" class="helper-text"></p>
+            </div>
+            <div class="face-footer">
+              <div id="tagsList" class="tag-list"></div>
+              <span class="mini-note">クリックまたはSpaceで回答を表示</span>
+            </div>
+          </div>
+          <div class="face face-back">
+            <div class="face-meta">
+              <span class="badge answer">Answer</span>
+              <span class="badge soft" id="originalNoBadge">No.</span>
+            </div>
+            <div class="face-body answer-body">
+              <p id="answerEn"></p>
+              <p id="answerJa" class="helper-text"></p>
+            </div>
+            <div class="face-footer answer-footer">
+              <span class="mini-note">もう一度クリックで質問面に戻ります</span>
+            </div>
+          </div>
+        </article>
+        <button class="nav-btn" id="nextBtn" aria-label="次のカード">▶</button>
+      </section>
+
+      <section class="panel action-panel">
+        <div class="button-row mobile-actions">
+          <button id="flipBtn" class="primary">めくる</button>
+          <button id="okBtn" class="success">このカードをOK</button>
+          <button id="skipBtn" class="ghost">次のカードへ</button>
+        </div>
+        <p class="mobile-hint">スマホでは左右スワイプで前後のカード移動、タップでめくれます。</p>
+      </section>
+
+      <section class="panel utility-panel">
+        <div class="utility-header">
+          <div>
+            <p class="eyebrow">Audio & Edit</p>
+            <h2>読み上げ・回答編集</h2>
+          </div>
+          <p class="utility-note">英語の質問・回答の読み上げと、回答文のローカル編集ができます。</p>
+        </div>
+        <div class="button-row utility-buttons">
+          <button id="speakQuestionBtn" class="ghost" type="button">質問を読み上げ</button>
+          <button id="speakAnswerBtn" class="ghost" type="button">回答を読み上げ</button>
+          <button id="stopSpeechBtn" class="ghost" type="button">読み上げ停止</button>
+          <button id="toggleEditorBtn" class="ghost" type="button">回答を編集</button>
+        </div>
+        <p id="speechStatus" class="speech-status" aria-live="polite">読み上げ待機中</p>
+
+        <div class="audio-settings-grid">
+          <div class="field">
+            <label for="voiceSelect">英語音声</label>
+            <select id="voiceSelect">
+              <option value="auto">自動で最適な音声を選択</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="speechRate">読み上げ速度</label>
+            <input id="speechRate" type="range" min="0.8" max="1.05" step="0.01" value="0.92" />
+          </div>
+        </div>
+        <p class="editor-note">端末に入っている英語音声の中から、できるだけ自然なものを優先して使います。</p>
+
+        <div class="import-panel">
+          <div class="editor-head">
+            <div>
+              <h3>Excelでカード内容を更新</h3>
+              <p class="editor-note">Categorized_QA シートの内容を読み込み、この端末上のカードデータを更新します。</p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="excelFileInput">Excelファイル</label>
+            <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
+          </div>
+          <div class="button-row editor-actions">
+            <button id="importExcelBtn" class="primary" type="button">Excelを読み込む</button>
+            <button id="resetImportedDataBtn" class="ghost" type="button">元の同梱データに戻す</button>
+          </div>
+          <p id="importStatus" class="translate-status">Excelをアップロードすると、このブラウザ内の暗記カード内容が更新されます。</p>
+        </div>
+
+        <div id="editorPanel" class="editor-panel hidden">
+          <div class="editor-head">
+            <div>
+              <h3>回答編集</h3>
+              <p class="editor-note">編集内容はこの端末のブラウザに保存されます。</p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="editAnswerJa">日本語回答</label>
+            <textarea id="editAnswerJa" rows="5" placeholder="日本語回答を編集"></textarea>
+          </div>
+          <div class="editor-row">
+            <label class="toggle"><input id="autoTranslateJaToEn" type="checkbox" checked /> 日本語から英語へ自動反映（オンライン時）</label>
+            <p id="translateStatus" class="translate-status">日本語を編集すると、オンライン時に英語回答へ自動反映します。</p>
+          </div>
+          <div class="field">
+            <label for="editAnswerEn">英語回答</label>
+            <textarea id="editAnswerEn" rows="6" placeholder="English answer will appear here"></textarea>
+          </div>
+          <div class="button-row editor-actions">
+            <button id="saveEditBtn" class="primary" type="button">編集を保存</button>
+            <button id="resetEditBtn" class="ghost" type="button">このカードの編集を解除</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel filter-panel">
+        <div class="utility-header">
+          <div>
+            <p class="eyebrow">Filter</p>
+            <h2>表示条件</h2>
+          </div>
+          <p class="utility-note">よく使う条件だけを上にまとめました。</p>
+        </div>
+
+        <div class="filter-grid compact">
+          <div class="field">
+            <label for="categoryFilter">カテゴリ</label>
+            <select id="categoryFilter"></select>
+          </div>
+          <div class="field">
+            <label for="statusFilter">表示対象</label>
+            <select id="statusFilter">
+              <option value="all">すべて</option>
+              <option value="unlearned">未OKのみ</option>
+              <option value="ok">OKのみ</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sortMode">並び順</label>
+            <select id="sortMode">
+              <option value="original">元No.順</option>
+              <option value="category">カテゴリ順</option>
+              <option value="random">ランダム</option>
+            </select>
+          </div>
+          <div class="field field-full">
+            <label for="searchText">検索</label>
+            <input id="searchText" type="text" placeholder="質問・回答を検索" />
+          </div>
+        </div>
+
+        <details class="advanced-filter">
+          <summary>詳細設定</summary>
+          <div class="filter-grid advanced-grid">
+            <div class="field">
+              <label for="tagFilter">タグ</label>
+              <select id="tagFilter"></select>
+            </div>
+          </div>
+          <div class="toggles compact-toggles">
+            <label class="toggle"><input id="showJapanese" type="checkbox" checked /> 日本語補助を表示</label>
+            <label class="toggle"><input id="autoNext" type="checkbox" /> OK後に次へ進む</label>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel list-panel">
+        <div class="list-header">
+          <h2>カード一覧</h2>
+          <p id="listSummary">0件</p>
+        </div>
+        <div id="cardList" class="card-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./data.js"></script>
+  <script src="./vendor/xlsx.full.min.js"></script>
+  <script src="./app.js"></script>
+  <script src="./pwa.js"></script>
+</body>
+</html>
