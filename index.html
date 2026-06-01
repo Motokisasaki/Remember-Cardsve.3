@@ -140,19 +140,38 @@
         <div class="import-panel">
           <div class="editor-head">
             <div>
-              <h3>Excelでカード内容を更新</h3>
-              <p class="editor-note">Categorized_QA シートの内容を読み込み、この端末上のカードデータを更新します。</p>
+              <h3>共有データ同期</h3>
+              <p class="editor-note">Cloudflare Worker の共有APIを設定すると、Excelアップロード内容を全端末で共通利用できます。</p>
             </div>
           </div>
+          <div class="sync-grid">
+            <div class="field field-full">
+              <label for="remoteApiUrl">共有データAPI URL</label>
+              <input id="remoteApiUrl" type="url" placeholder="https://xxxxx.workers.dev/dataset" />
+            </div>
+            <div class="field">
+              <label for="remoteAdminKey">管理キー（更新する端末のみ）</label>
+              <input id="remoteAdminKey" type="password" placeholder="Cloudflare Worker の ADMIN_KEY" />
+            </div>
+            <div class="field checkbox-field">
+              <label class="toggle toggle-compact"><input id="autoSyncRemote" type="checkbox" checked /> 起動時・復帰時・5分ごとに自動同期</label>
+            </div>
+          </div>
+          <div class="button-row editor-actions">
+            <button id="saveRemoteConfigBtn" class="ghost" type="button">共有設定を保存</button>
+            <button id="syncRemoteBtn" class="ghost" type="button">最新データを取得</button>
+          </div>
+          <p id="remoteStatus" class="translate-status">共有API未設定です。設定後は他端末も同じデータを自動取得します。</p>
+
           <div class="field">
             <label for="excelFileInput">Excelファイル</label>
             <input id="excelFileInput" type="file" accept=".xlsx,.xls" />
           </div>
           <div class="button-row editor-actions">
-            <button id="importExcelBtn" class="primary" type="button">Excelを読み込む</button>
-            <button id="resetImportedDataBtn" class="ghost" type="button">元の同梱データに戻す</button>
+            <button id="importExcelBtn" class="primary" type="button">Excelを全端末へ反映</button>
+            <button id="resetImportedDataBtn" class="ghost" type="button">この端末だけ同梱データに戻す</button>
           </div>
-          <p id="importStatus" class="translate-status">Excelをアップロードすると、このブラウザ内の暗記カード内容が更新されます。</p>
+          <p id="importStatus" class="translate-status">Excelをアップロードすると共有APIへ反映し、他端末は自動同期で更新されます。API未設定時はこの端末だけ更新します。</p>
         </div>
 
         <div id="editorPanel" class="editor-panel hidden">

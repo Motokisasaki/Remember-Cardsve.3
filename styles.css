@@ -266,7 +266,8 @@ button.ghost.danger {
   transform-style: preserve-3d;
   transition: transform .55s ease;
   cursor: pointer;
-  touch-action: pan-y;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .flashcard.flipped { transform: rotateY(180deg); }
@@ -859,4 +860,64 @@ button.ghost.danger {
     min-height: 40px;
     letter-spacing: -.01em;
   }
+}
+
+
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.checkbox-field {
+  justify-content: flex-end;
+}
+
+.toggle-compact {
+  min-height: 46px;
+  padding: 0 2px;
+  color: var(--text);
+}
+
+#remoteStatus[data-tone="success"],
+#translateStatus[data-tone="success"] {
+  color: #86efac;
+}
+
+#remoteStatus[data-tone="error"],
+#translateStatus[data-tone="error"] {
+  color: #fda4af;
+}
+
+#remoteStatus[data-tone="loading"],
+#translateStatus[data-tone="loading"] {
+  color: #7dd3fc;
+}
+
+#remoteStatus[data-tone="muted"],
+#translateStatus[data-tone="muted"] {
+  color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .sync-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-field {
+    justify-content: stretch;
+  }
+}
+
+
+.face,
+.face-body,
+.face-footer,
+.face-meta {
+  -webkit-user-select: none;
+  user-select: none;
 }

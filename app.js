@@ -51,12 +51,20 @@ const els = {
   importExcelBtn: document.getElementById('importExcelBtn'),
   resetImportedDataBtn: document.getElementById('resetImportedDataBtn'),
   importStatus: document.getElementById('importStatus'),
+  remoteApiUrl: document.getElementById('remoteApiUrl'),
+  remoteAdminKey: document.getElementById('remoteAdminKey'),
+  autoSyncRemote: document.getElementById('autoSyncRemote'),
+  saveRemoteConfigBtn: document.getElementById('saveRemoteConfigBtn'),
+  syncRemoteBtn: document.getElementById('syncRemoteBtn'),
+  remoteStatus: document.getElementById('remoteStatus'),
 };
 
 const STORAGE_KEY = 'gbc_flashcards_ok_map_v1';
 const SETTINGS_KEY = 'gbc_flashcards_settings_v2';
 const EDITS_KEY = 'gbc_flashcards_answer_edits_v1';
 const IMPORTED_DATA_KEY = 'gbc_flashcards_imported_dataset_v1';
+const REMOTE_CONFIG_KEY = 'gbc_flashcards_remote_config_v1';
+const REMOTE_CACHE_KEY = 'gbc_flashcards_remote_cache_v1';
 
 const state = {
   allItems: [],
@@ -68,6 +76,9 @@ const state = {
   settings: loadSettings(),
   editsMap: loadJson(EDITS_KEY, {}),
   importedData: loadJson(IMPORTED_DATA_KEY, null),
+  remoteConfig: loadRemoteConfig(),
+  remotePayload: loadJson(REMOTE_CACHE_KEY, null),
+  remoteSyncTimer: null,
   editorOpen: false,
   touch: {
     startX: 0,
@@ -77,6 +88,7 @@ const state = {
   translateTimer: null,
   translateRequestId: 0,
   utterances: [],
+  lastCardToggleAt: 0,
 };
 
 function loadJson(key, fallback) {
@@ -133,6 +145,152 @@ function saveEditsMap() {
 function saveImportedData() {
   saveJson(IMPORTED_DATA_KEY, state.importedData);
 }
+
+function loadRemoteConfig() {
+  return {
+    endpoint: '',
+    adminKey: '',
+    autoSync: true,
+    ...loadJson(REMOTE_CONFIG_KEY, {}),
+  };
+}
+
+function normalizeEndpoint(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function saveRemoteConfig() {
+  state.remoteConfig = {
+    endpoint: normalizeEndpoint(els.remoteApiUrl?.value || ''),
+    adminKey: String(els.remoteAdminKey?.value || '').trim(),
+    autoSync: Boolean(els.autoSyncRemote?.checked),
+  };
+  saveJson(REMOTE_CONFIG_KEY, state.remoteConfig);
+  scheduleRemoteSync();
+  return state.remoteConfig;
+}
+
+function populateRemoteConfigFields() {
+  if (els.remoteApiUrl) els.remoteApiUrl.value = state.remoteConfig.endpoint || '';
+  if (els.remoteAdminKey) els.remoteAdminKey.value = state.remoteConfig.adminKey || '';
+  if (els.autoSyncRemote) els.autoSyncRemote.checked = state.remoteConfig.autoSync !== false;
+}
+
+function describeRemotePayload(payload) {
+  const count = payload?.itemCount || payload?.dataset?.items?.length || 0;
+  const time = payload?.updatedAt ? new Date(payload.updatedAt).toLocaleString('ja-JP') : '時刻不明';
+  const file = payload?.fileName ? ` / ${payload.fileName}` : '';
+  return `${count}件 / ${time}${file}`;
+}
+
+function setRemoteStatus(message, tone = 'muted') {
+  if (!els.remoteStatus) return;
+  els.remoteStatus.textContent = message;
+  els.remoteStatus.dataset.tone = tone;
+}
+
+function saveRemotePayload(payload) {
+  state.remotePayload = payload;
+  saveJson(REMOTE_CACHE_KEY, payload);
+}
+
+function getRemoteEndpoint() {
+  return normalizeEndpoint(els.remoteApiUrl?.value || state.remoteConfig.endpoint);
+}
+
+function buildRemoteFetchUrl() {
+  const endpoint = getRemoteEndpoint();
+  if (!endpoint) return '';
+  const sep = endpoint.includes('?') ? '&' : '?';
+  return `${endpoint}${sep}_=${Date.now()}`;
+}
+
+async function fetchRemoteDataset({ silent = false } = {}) {
+  const endpoint = getRemoteEndpoint();
+  if (!endpoint) {
+    if (!silent) setRemoteStatus('共有データAPI URLを設定すると、全端末で同じカード内容を使えます。');
+    return null;
+  }
+
+  try {
+    if (!silent) setRemoteStatus('共有データを取得中…', 'loading');
+    const response = await fetch(buildRemoteFetchUrl(), { cache: 'no-store' });
+    if (!response.ok) throw new Error(`http_${response.status}`);
+    const payload = await response.json();
+    if (!payload?.dataset?.items?.length) throw new Error('empty_dataset');
+    return payload;
+  } catch (error) {
+    if (!silent) {
+      setRemoteStatus('共有データの取得に失敗しました。オフライン時は前回同期した内容を利用します。', 'error');
+    }
+    return null;
+  }
+}
+
+function applyRemotePayload(payload, { keepCurrent = true, announce = true } = {}) {
+  if (!payload?.dataset?.items?.length) return false;
+  const keepCurrentId = keepCurrent ? (getCurrentItem()?.id || null) : null;
+  installDataset(payload.dataset, { imported: false });
+  saveRemotePayload(payload);
+  buildFilters();
+  applyFilters(keepCurrentId);
+  if (announce) {
+    setRemoteStatus(`共有データを同期しました（${describeRemotePayload(payload)}）`, 'success');
+  }
+  return true;
+}
+
+async function syncRemoteDataset({ silent = false, force = false } = {}) {
+  const payload = await fetchRemoteDataset({ silent });
+  if (!payload) return false;
+  const currentVersion = state.remotePayload?.version || '';
+  const incomingCount = payload.itemCount || payload.dataset?.items?.length || 0;
+  if (force || payload.version !== currentVersion || incomingCount !== state.allItems.length) {
+    applyRemotePayload(payload, { keepCurrent: true, announce: !silent });
+  } else if (!silent) {
+    setRemoteStatus(`共有データは最新です（${describeRemotePayload(payload)}）`, 'success');
+  }
+  return true;
+}
+
+async function pushDatasetToRemote(dataset, fileName) {
+  const endpoint = getRemoteEndpoint();
+  const adminKey = String(els.remoteAdminKey?.value || state.remoteConfig.adminKey || '').trim();
+  if (!endpoint) return { mode: 'local_only' };
+  if (!adminKey) throw new Error('missing_admin_key');
+
+  saveRemoteConfig();
+  setRemoteStatus('共有データへアップロード中…', 'loading');
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      adminKey,
+      fileName,
+      dataset,
+    }),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('unauthorized');
+    throw new Error(`http_${response.status}`);
+  }
+  return response.json();
+}
+
+function scheduleRemoteSync() {
+  if (state.remoteSyncTimer) clearInterval(state.remoteSyncTimer);
+  const config = state.remoteConfig || {};
+  if (!config.endpoint || config.autoSync === false) return;
+  state.remoteSyncTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      syncRemoteDataset({ silent: true });
+    }
+  }, 5 * 60 * 1000);
+}
+
 
 function escapeHtml(value) {
   return String(value)
@@ -397,21 +555,41 @@ async function importExcelFile() {
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: 'array' });
     const dataset = parseWorkbookToDataset(workbook);
-    installDataset(dataset, { imported: true });
+    const remoteResult = await pushDatasetToRemote(dataset, file.name);
+
     state.editsMap = {};
     saveEditsMap();
-    buildFilters();
-    applyFilters();
-    if (els.importStatus) {
-      els.importStatus.textContent = `${file.name} から ${dataset.items.length} 件のカードを更新しました。この端末に保存されています。`;
+
+    if (remoteResult?.mode === 'local_only') {
+      installDataset(dataset, { imported: true });
+      buildFilters();
+      applyFilters();
+      if (els.importStatus) {
+        els.importStatus.textContent = `${file.name} から ${dataset.items.length} 件のカードを更新しました。共有API未設定のため、この端末だけ更新しています。`;
+      }
+      setRemoteStatus('共有データAPI URLを設定すると、次回から全端末へ自動反映できます。');
+      return;
     }
+
+    applyRemotePayload(remoteResult, { keepCurrent: false, announce: false });
+    if (els.importStatus) {
+      els.importStatus.textContent = `${file.name} を共有データへ反映しました。${remoteResult.itemCount || dataset.items.length} 件が全端末向けの最新データになります。`;
+    }
+    setRemoteStatus(`共有データを更新しました（${describeRemotePayload(remoteResult)}）`, 'success');
   } catch (error) {
     if (els.importStatus) {
       if (error.message === 'invalid_headers') {
         els.importStatus.textContent = 'Excelの列名を確認してください。Categorized_QA シートの「カテゴリ / 英語質問 / 英語回答」などが必要です。';
+      } else if (error.message === 'missing_admin_key') {
+        els.importStatus.textContent = '共有APIが設定されていますが、管理キーが未入力です。更新する端末では管理キーを入力してください。';
+      } else if (error.message === 'unauthorized') {
+        els.importStatus.textContent = '管理キーが一致しないため共有データを更新できませんでした。';
       } else {
-        els.importStatus.textContent = 'Excelの読み込みに失敗しました。元のフォーマットに近いファイルを使ってください。';
+        els.importStatus.textContent = 'Excelの読み込みまたは共有データ反映に失敗しました。ファイル形式または共有API設定を確認してください。';
       }
+    }
+    if (error.message === 'missing_admin_key' || error.message === 'unauthorized') {
+      setRemoteStatus('共有データの更新に失敗しました。管理キーまたはAPI設定を確認してください。', 'error');
     }
   }
 }
@@ -421,7 +599,7 @@ function resetImportedDataset() {
   buildFilters();
   applyFilters();
   if (els.importStatus) {
-    els.importStatus.textContent = '同梱されている元のカードデータに戻しました。';
+    els.importStatus.textContent = 'この端末だけ同梱データに戻しました。共有同期を有効にしている場合、再同期時に共有データへ戻ります。';
   }
 }
 
@@ -615,6 +793,24 @@ function toggleFlip(force) {
   els.flashcard.classList.toggle('flipped', state.flipped);
 }
 
+function markCardToggle() {
+  state.lastCardToggleAt = Date.now();
+}
+
+function recentlyToggledCard() {
+  return Date.now() - (state.lastCardToggleAt || 0) < 450;
+}
+
+function isInteractiveElement(target) {
+  return Boolean(target?.closest?.('button, input, select, textarea, label, summary, a, [data-jump]'));
+}
+
+function handleCardTap(event) {
+  if (isInteractiveElement(event?.target)) return;
+  markCardToggle();
+  toggleFlip();
+}
+
 async function translateJapaneseToEnglish(text) {
   const requestId = ++state.translateRequestId;
   const endpoint = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=en&dt=t&q=${encodeURIComponent(text)}`;
@@ -770,6 +966,8 @@ function handleFlashcardTouchStart(event) {
 function handleFlashcardTouchEnd(event) {
   const touch = event.changedTouches?.[0];
   if (!touch) return;
+  if (isInteractiveElement(event?.target)) return;
+
   const dx = touch.clientX - state.touch.startX;
   const dy = touch.clientY - state.touch.startY;
   const elapsed = Date.now() - state.touch.startTime;
@@ -779,8 +977,9 @@ function handleFlashcardTouchEnd(event) {
     return;
   }
 
-  if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && elapsed < 300) {
-    toggleFlip();
+  const isTap = Math.abs(dx) < 18 && Math.abs(dy) < 18 && elapsed < 450;
+  if (isTap) {
+    handleCardTap(event);
   }
 }
 
@@ -802,9 +1001,22 @@ function attachEvents() {
   els.nextBtn.addEventListener('click', nextCard);
   els.resetOkBtn.addEventListener('click', resetAllOk);
   els.shuffleBtn.addEventListener('click', randomizeCurrentView);
-  els.flashcard.addEventListener('click', () => toggleFlip());
+  els.flashcard.addEventListener('click', event => {
+    if (recentlyToggledCard()) return;
+    handleCardTap(event);
+  });
   els.flashcard.addEventListener('touchstart', handleFlashcardTouchStart, { passive: true });
   els.flashcard.addEventListener('touchend', handleFlashcardTouchEnd, { passive: true });
+  els.flashcard.addEventListener('pointerup', event => {
+    if (event.pointerType !== 'touch') return;
+    if (recentlyToggledCard()) return;
+    if (isInteractiveElement(event.target)) return;
+    const dx = event.clientX - state.touch.startX;
+    const dy = event.clientY - state.touch.startY;
+    if (Math.abs(dx) < 18 && Math.abs(dy) < 18) {
+      handleCardTap(event);
+    }
+  });
 
   els.speakQuestionBtn?.addEventListener('click', () => {
     const item = getCurrentEffectiveItem();
@@ -832,6 +1044,17 @@ function attachEvents() {
 
   els.importExcelBtn?.addEventListener('click', importExcelFile);
   els.resetImportedDataBtn?.addEventListener('click', resetImportedDataset);
+  els.saveRemoteConfigBtn?.addEventListener('click', async () => {
+    saveRemoteConfig();
+    if (state.remoteConfig.endpoint) {
+      setRemoteStatus('共有設定を保存しました。最新データを確認します…', 'loading');
+      await syncRemoteDataset({ silent: false, force: true });
+    } else {
+      setRemoteStatus('共有設定を保存しました。API URLが未設定のため、この端末だけで動作します。');
+    }
+  });
+  els.syncRemoteBtn?.addEventListener('click', () => syncRemoteDataset({ silent: false, force: true }));
+  els.autoSyncRemote?.addEventListener('change', saveRemoteConfig);
 
   els.cardList.addEventListener('click', event => {
     const button = event.target.closest('[data-jump]');
@@ -860,8 +1083,17 @@ function attachEvents() {
     }
   });
 
-  window.addEventListener('online', renderEditor);
+  window.addEventListener('online', () => {
+    renderEditor();
+    syncRemoteDataset({ silent: true, force: true });
+  });
   window.addEventListener('offline', renderEditor);
+  window.addEventListener('focus', () => syncRemoteDataset({ silent: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      syncRemoteDataset({ silent: true });
+    }
+  });
   if ('speechSynthesis' in window) {
     window.speechSynthesis.addEventListener?.('voiceschanged', populateVoiceOptions);
     populateVoiceOptions();
@@ -870,13 +1102,28 @@ function attachEvents() {
 }
 
 function init() {
-  const startingData = state.importedData?.items?.length ? state.importedData : DEFAULT_DATA;
-  installDataset(startingData, { imported: Boolean(state.importedData?.items?.length) });
+  populateRemoteConfigFields();
+  const cachedRemoteDataset = state.remotePayload?.dataset?.items?.length ? state.remotePayload.dataset : null;
+  const startingData = cachedRemoteDataset || (state.importedData?.items?.length ? state.importedData : DEFAULT_DATA);
+  installDataset(startingData, { imported: Boolean(!cachedRemoteDataset && state.importedData?.items?.length) });
   buildFilters();
   attachEvents();
   applyFilters();
-  if (state.importedData?.items?.length && els.importStatus) {
+  scheduleRemoteSync();
+
+  if (cachedRemoteDataset) {
+    setRemoteStatus(`前回同期した共有データを表示中（${describeRemotePayload(state.remotePayload)}）`, 'success');
+    if (els.importStatus) {
+      els.importStatus.textContent = `前回同期した共有データ（${cachedRemoteDataset.items.length}件）を復元しました。`;
+    }
+  } else if (state.importedData?.items?.length && els.importStatus) {
     els.importStatus.textContent = `前回読み込んだExcelの内容（${state.importedData.items.length}件）を復元しました。`;
+  }
+
+  if (state.remoteConfig.endpoint) {
+    syncRemoteDataset({ silent: false, force: true });
+  } else {
+    setRemoteStatus('共有データAPI URLを設定すると、Excelアップロード内容を全端末へ自動反映できます。');
   }
 }
 
