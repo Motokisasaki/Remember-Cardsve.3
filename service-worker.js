@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'gbc-flashcards-v8';
+const CACHE_VERSION = 'gbc-flashcards-v9';
 const APP_SHELL = [
   './',
   './index.html',
